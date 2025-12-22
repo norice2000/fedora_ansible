@@ -1,0 +1,215 @@
+---
+# Restores: Hyper, GNOME extensions, NFS, pip3, KVM/QEMU setup
+
+- name: Restore Fedora Setup
+  hosts: localhost
+  connection: local
+  become: yes
+  
+  vars:
+    setup_dir: "my_setup"
+    user_name: "{{ lookup('env', 'USER') }}"
+    user_home: "{{ lookup('env', 'HOME') }}"
+    kvm_network: "192.168.124.0/24"
+  
+  tasks:
+    - name: Auto-detect WiFi interface
+      shell: ip route show default | grep -oP 'dev \K\w+' | head -1
+      register: wifi_if
+      changed_when: false
+      tags: always
+    
+    - name: Set WiFi interface variable
+      set_fact:
+        wifi_interface: "{{ wifi_if.stdout }}"
+      tags: always
+    
+    - name: Display detected WiFi interface
+      debug:
+        msg: "Detected WiFi interface: {{ wifi_interface }}"
+      tags: always
+    - name: Install KVM/QEMU packages
+      dnf:
+        name:
+          - qemu-kvm
+          - libvirt
+          - virt-install
+          - virt-manager
+          - virt-viewer
+          - bridge-utils
+        state: present
+      tags: kvm
+
+    - name: Start and enable virtualization services
+      systemd:
+        name: "{{ item }}"
+        state: started
+        enabled: yes
+      loop:
+        - libvirtd
+        - firewalld
+      tags: kvm
+
+    - name: Add user to libvirt group
+      user:
+        name: "{{ user_name }}"
+        groups: libvirt
+        append: yes
+      tags: kvm
+
+    - name: Start and autostart libvirt default network
+      block:
+        - name: Start default network
+          command: virsh net-start default
+          ignore_errors: yes
+        
+        - name: Autostart default network
+          command: virsh net-autostart default
+          ignore_errors: yes
+      tags: kvm
+
+    - name: Create libvirt hooks directory
+      file:
+        path: /etc/libvirt/hooks
+        state: directory
+        mode: '0755'
+      tags: kvm
+
+    - name: Create libvirt network hook for iptables
+      copy:
+        dest: /etc/libvirt/hooks/network
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          if [ "$2" = "started" ] && [ "$1" = "default" ]; then
+              iptables -t nat -A POSTROUTING -s {{ kvm_network }} -o {{ wifi_interface }} -j MASQUERADE
+              iptables -A FORWARD -s {{ kvm_network }} -j ACCEPT
+              iptables -A FORWARD -d {{ kvm_network }} -m state --state RELATED,ESTABLISHED -j ACCEPT
+          fi
+      tags: kvm
+    
+    - name: Restart libvirtd to activate hook
+      systemd:
+        name: libvirtd
+        state: restarted
+      tags: kvm
+
+    - name: Apply iptables rules for KVM (immediate)
+      block:
+        - name: NAT rule for KVM
+          iptables:
+            table: nat
+            chain: POSTROUTING
+            source: "{{ kvm_network }}"
+            out_interface: "{{ wifi_interface }}"
+            jump: MASQUERADE
+        
+        - name: Forward rule - source
+          iptables:
+            chain: FORWARD
+            source: "{{ kvm_network }}"
+            jump: ACCEPT
+        
+        - name: Forward rule - destination
+          iptables:
+            chain: FORWARD
+            destination: "{{ kvm_network }}"
+            match: state
+            ctstate: RELATED,ESTABLISHED
+            jump: ACCEPT
+      tags: kvm
+
+    - name: Install pip3 packages
+      block:
+        - name: Ensure pip3 is installed
+          dnf:
+            name: python3-pip
+            state: present
+        
+        - name: Check if pip3 packages list exists
+          stat:
+            path: "{{ setup_dir }}/pip3_packages.txt"
+          register: pip_file
+        
+        - name: Install pip3 packages from backup
+          pip:
+            requirements: "{{ setup_dir }}/pip3_packages.txt"
+            extra_args: --user
+          become: no
+          when: pip_file.stat.exists
+      tags: pip
+
+    - name: Install GNOME extensions support
+      dnf:
+        name:
+          - gnome-extensions-app
+          - gnome-tweaks
+        state: present
+      tags: gnome
+
+    - name: Restore GNOME settings
+      block:
+        - name: Check if GNOME extensions settings exist
+          stat:
+            path: "{{ setup_dir }}/gnome_extensions_settings.dconf"
+          register: gnome_ext_settings
+        
+        - name: Check if GNOME desktop settings exist
+          stat:
+            path: "{{ setup_dir }}/gnome_desktop_settings.dconf"
+          register: gnome_desktop_settings
+        
+        - name: Restore GNOME extension settings
+          shell: dconf load /org/gnome/shell/extensions/ < {{ setup_dir }}/gnome_extensions_settings.dconf
+          become: no
+          when: gnome_ext_settings.stat.exists
+        
+        - name: Restore GNOME desktop settings
+          shell: dconf load /org/gnome/desktop/ < {{ setup_dir }}/gnome_desktop_settings.dconf
+          become: no
+          when: gnome_desktop_settings.stat.exists
+      tags: gnome
+
+    - name: Install Hyper Terminal
+      block:
+        - name: Download Hyper
+          get_url:
+            url: https://releases.hyper.is/download/rpm
+            dest: /tmp/hyper.rpm
+        
+        - name: Install Hyper
+          dnf:
+            name: /tmp/hyper.rpm
+            state: present
+            disable_gpg_check: yes
+        
+        - name: Check if Hyper config exists
+          stat:
+            path: "{{ setup_dir }}/hyper.js"
+          register: hyper_config
+        
+        - name: Restore Hyper config
+          copy:
+            src: "{{ setup_dir }}/hyper.js"
+            dest: "{{ user_home }}/.hyper.js"
+            owner: "{{ user_name }}"
+            group: "{{ user_name }}"
+          when: hyper_config.stat.exists
+      tags: hyper
+
+    - name: Final checks and summary
+      debug:
+        msg:
+          - "=== Setup Complete! ==="
+          - ""
+          - "Next steps:"
+          - "1. Log out and back in for libvirt group to take effect"
+          - "2. Verify NFS mount: df -h | grep lenova"
+          - "3. Test KVM networking: Create a VM and ping google.com"
+          - "4. Check GNOME extensions: gnome-extensions list"
+          - "5. Verify iptables: sudo iptables -t nat -L -n -v | grep 192.168.124"
+          - ""
+          - "To manually install GNOME extensions from your backup:"
+          - "  - Review {{ setup_dir }}/gnome_extensions.txt"
+          - "  - Install via GNOME Extensions app or from extensions.gnome.org"
+      tags: always
