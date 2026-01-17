@@ -1,0 +1,35 @@
+---
+- name: Install GNOME extensions support
+  dnf:
+    name:
+      - gnome-extensions-app
+      - gnome-tweaks
+    state: present
+
+- name: Check if GNOME extension settings exist
+  stat:
+    path: "{{ setup_dir }}/gnome_extensions_settings.dconf"
+  register: gnome_ext_settings
+
+- name: Check if GNOME desktop settings exist
+  stat:
+    path: "{{ setup_dir }}/gnome_desktop_settings.dconf"
+  register: gnome_desktop_settings
+
+- name: Restore GNOME extension settings
+  shell: dconf load /org/gnome/shell/extensions/ < {{ setup_dir }}/gnome_extensions_settings.dconf
+  become: no
+  when: gnome_ext_settings.stat.exists
+
+- name: Restore GNOME desktop settings
+  shell: dconf load /org/gnome/desktop/ < {{ setup_dir }}/gnome_desktop_settings.dconf
+  become: no
+  when: gnome_desktop_settings.stat.exists
+
+- name: Display GNOME extensions info
+  debug:
+    msg:
+      - "GNOME settings restored"
+      - "To manually install extensions, check: {{ setup_dir }}/gnome_extensions.txt"
+      - "Visit: https://extensions.gnome.org"
+  when: gnome_ext_settings.stat.exists or gnome_desktop_settings.stat.exists

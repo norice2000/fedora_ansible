@@ -1,0 +1,51 @@
+---
+- name: Restore Fedora Setup
+  hosts: localhost
+  connection: local
+  become: yes
+  
+  pre_tasks:
+    - name: Auto-detect network interface
+      shell: ip route show default | grep -oP 'dev \K\w+' | head -1
+      register: detected_interface
+      changed_when: false
+      tags: always
+    
+    - name: Set network interface variable
+      set_fact:
+        host_interface: "{{ detected_interface.stdout }}"
+      tags: always
+    
+    - name: Display detected network interface
+      debug:
+        msg: "Detected network interface: {{ host_interface }}"
+      tags: always
+  
+  roles:
+    - role: kvm
+      tags: kvm
+    - role: hyper
+      tags: hyper
+    - role: gnome
+      tags: gnome
+    - role: pip3
+      tags: pip
+    - role: nfs
+      tags: nfs
+  
+  post_tasks:
+    - name: Setup complete message
+      debug:
+        msg:
+          - "=== Setup Complete! ==="
+          - ""
+          - "Next steps:"
+          - "1. LOGOUT AND LOGIN for group changes to take effect"
+          - "2. Reboot to verify KVM network starts automatically"
+          - "3. Verify NFS: df -h | grep nfs"
+          - "4. Check GNOME extensions: gnome-extensions list"
+          - ""
+          - "To run specific roles:"
+          - "  ansible-playbook site.yml --tags kvm"
+          - "  ansible-playbook site.yml --tags hyper,gnome"
+      tags: always

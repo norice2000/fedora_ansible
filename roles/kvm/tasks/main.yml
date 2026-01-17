@@ -1,0 +1,121 @@
+---
+- name: Install KVM/QEMU packages
+  dnf:
+    name: "{{ kvm_packages }}"
+    state: present
+
+- name: Start and enable virtualization services
+  systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: yes
+  loop: "{{ kvm_services }}"
+
+- name: Add user to libvirt group
+  user:
+    name: "{{ user_name }}"
+    groups: libvirt
+    append: yes
+
+- name: Wait for libvirtd to be ready
+  pause:
+    seconds: 3
+
+- name: Ensure default network is defined
+  command: virsh net-define /usr/share/libvirt/networks/default.xml
+  ignore_errors: yes
+
+- name: Start default network
+  command: virsh net-start default
+  ignore_errors: yes
+
+- name: Autostart default network (fixes reboot issue)
+  command: virsh net-autostart default
+
+- name: Enable IP forwarding
+  sysctl:
+    name: "{{ item }}"
+    value: '1'
+    state: present
+    sysctl_set: yes
+  loop:
+    - net.ipv4.ip_forward
+    - net.ipv4.conf.all.forwarding
+
+- name: Make IP forwarding persistent
+  copy:
+    content: |
+      net.ipv4.ip_forward=1
+      net.ipv4.conf.all.forwarding=1
+    dest: /etc/sysctl.d/99-kvm-forwarding.conf
+    mode: '0644'
+
+- name: Configure firewalld libvirt zone
+  shell: |
+    firewall-cmd --permanent --zone=libvirt --add-service=dhcp
+    firewall-cmd --permanent --zone=libvirt --add-service=dns
+    firewall-cmd --permanent --zone=libvirt --add-service=ssh
+    firewall-cmd --permanent --zone=libvirt --add-interface={{ vm_bridge }}
+    firewall-cmd --permanent --zone=libvirt --add-masquerade
+    firewall-cmd --permanent --zone=libvirt --add-forward
+    firewall-cmd --permanent --zone=libvirt --remove-rich-rule='rule priority="32767" reject' 2>/dev/null || true
+    firewall-cmd --reload
+
+- name: Add iptables NAT rule
+  shell: |
+    iptables -t nat -C POSTROUTING -s {{ vm_subnet }} -o {{ host_interface }} -j MASQUERADE 2>/dev/null || \
+    iptables -t nat -A POSTROUTING -s {{ vm_subnet }} -o {{ host_interface }} -j MASQUERADE
+
+- name: Add iptables FORWARD rules
+  shell: |
+    iptables -C FORWARD -s {{ vm_subnet }} -j ACCEPT 2>/dev/null || \
+    iptables -I FORWARD -s {{ vm_subnet }} -j ACCEPT
+    
+    iptables -C FORWARD -d {{ vm_subnet }} -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || \
+    iptables -I FORWARD -d {{ vm_subnet }} -m state --state RELATED,ESTABLISHED -j ACCEPT
+
+- name: Create libvirt hooks directory
+  file:
+    path: /etc/libvirt/hooks
+    state: directory
+    mode: '0755'
+
+- name: Create libvirt network hook (backup iptables rules)
+  template:
+    src: network-hook.sh.j2
+    dest: /etc/libvirt/hooks/network
+    mode: '0755'
+
+- name: Create systemd service for network autostart
+  template:
+    src: libvirt-network.service.j2
+    dest: /etc/systemd/system/libvirt-default-network.service
+    mode: '0644'
+
+- name: Enable libvirt network systemd service
+  systemd:
+    name: libvirt-default-network
+    enabled: yes
+    daemon_reload: yes
+
+- name: Restart libvirtd to activate hook
+  systemd:
+    name: libvirtd
+    state: restarted
+
+- name: Verify KVM network setup
+  shell: |
+    echo "=== Network Status ==="
+    virsh net-list --all
+    echo ""
+    echo "=== IP Forwarding ==="
+    cat /proc/sys/net/ipv4/ip_forward
+    echo ""
+    echo "=== Firewall Config ==="
+    firewall-cmd --zone=libvirt --list-all | head -10
+  register: kvm_status
+  changed_when: false
+
+- name: Display KVM status
+  debug:
+    var: kvm_status.stdout_lines

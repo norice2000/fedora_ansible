@@ -1,0 +1,17 @@
+---
+- name: Ensure pip3 is installed
+  dnf:
+    name: python3-pip
+    state: present
+
+- name: Check if pip3 packages backup exists
+  stat:
+    path: "{{ setup_dir }}/pip3_packages.txt"
+  register: pip_file
+
+- name: Install pip3 packages from backup
+  pip:
+    requirements: "{{ setup_dir }}/pip3_packages.txt"
+    extra_args: --user
+  become: no
+  when: pip_file.stat.exists

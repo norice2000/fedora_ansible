@@ -1,0 +1,27 @@
+---
+- name: Download Hyper terminal
+  get_url:
+    url: https://releases.hyper.is/download/rpm
+    dest: /tmp/hyper.rpm
+  tags: hyper
+
+- name: Install Hyper
+  dnf:
+    name: /tmp/hyper.rpm
+    state: present
+    disable_gpg_check: yes
+
+- name: Check if Hyper config backup exists
+  stat:
+    path: "{{ setup_dir }}/hyper.js"
+  register: hyper_config
+
+- name: Restore Hyper config
+  copy:
+    src: "{{ setup_dir }}/hyper.js"
+    dest: "{{ user_home }}/.hyper.js"
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+    mode: '0644'
+  when: hyper_config.stat.exists
+  become: no

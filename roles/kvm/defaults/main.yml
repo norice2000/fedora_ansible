@@ -1,0 +1,15 @@
+---
+kvm_packages:
+  - qemu-kvm
+  - libvirt
+  - libvirt-daemon-kvm
+  - libvirt-daemon-config-network
+  - libvirt-client
+  - virt-install
+  - virt-manager
+  - virt-viewer
+  - bridge-utils
+
+kvm_services:
+  - libvirtd
+  - firewalld

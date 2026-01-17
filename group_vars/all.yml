@@ -1,0 +1,14 @@
+---
+# User configuration
+user_name: "{{ lookup('env', 'USER') }}"
+user_home: "{{ lookup('env', 'HOME') }}"
+
+# Backup directory
+setup_dir: "my_setup"
+
+# KVM configuration (FIXED - correct subnet)
+vm_subnet: "192.168.122.0/24"
+vm_bridge: "virbr0"
+
+# This gets set dynamically in site.yml pre_tasks
+# host_interface: "wlp0s20f3"

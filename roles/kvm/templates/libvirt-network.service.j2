@@ -1,0 +1,12 @@
+[Unit]
+Description=Start libvirt default network
+After=libvirtd.service
+Requires=libvirtd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/virsh net-start default
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

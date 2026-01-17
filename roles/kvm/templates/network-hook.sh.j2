@@ -1,0 +1,16 @@
+#!/bin/bash
+# Libvirt network hook - applies iptables rules when network starts
+# This ensures rules persist after network restarts
+
+if [ "$2" = "started" ] && [ "$1" = "default" ]; then
+    # NAT rule for internet access
+    iptables -t nat -C POSTROUTING -s {{ vm_subnet }} -o {{ host_interface }} -j MASQUERADE 2>/dev/null || \
+    iptables -t nat -A POSTROUTING -s {{ vm_subnet }} -o {{ host_interface }} -j MASQUERADE
+    
+    # Forward rules
+    iptables -C FORWARD -s {{ vm_subnet }} -j ACCEPT 2>/dev/null || \
+    iptables -I FORWARD -s {{ vm_subnet }} -j ACCEPT
+    
+    iptables -C FORWARD -d {{ vm_subnet }} -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || \
+    iptables -I FORWARD -d {{ vm_subnet }} -m state --state RELATED,ESTABLISHED -j ACCEPT
+fi

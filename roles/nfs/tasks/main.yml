@@ -1,0 +1,33 @@
+---
+- name: Install NFS client packages
+  dnf:
+    name:
+      - nfs-utils
+    state: present
+
+- name: Check if NFS mounts backup exists
+  stat:
+    path: "{{ setup_dir }}/nfs_mounts.txt"
+  register: nfs_backup
+
+- name: Read NFS mounts from backup
+  slurp:
+    src: "{{ setup_dir }}/nfs_mounts.txt"
+  register: nfs_content
+  when: nfs_backup.stat.exists
+
+- name: Display NFS mounts info
+  debug:
+    msg:
+      - "NFS mounts found in backup:"
+      - "{{ (nfs_content['content'] | b64decode).split('\n') }}"
+      - ""
+      - "Add these to /etc/fstab manually or use the mount module"
+  when: 
+    - nfs_backup.stat.exists
+    - nfs_content['content'] | b64decode | trim != "No NFS mounts"
+
+- name: Warning if no NFS mounts
+  debug:
+    msg: "No NFS mounts found in backup"
+  when: not nfs_backup.stat.exists or (nfs_content['content'] | b64decode | trim == "No NFS mounts")
